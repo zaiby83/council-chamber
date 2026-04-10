@@ -7,7 +7,7 @@ import { SetupWizard } from './components/setup/SetupWizard';
 import { useWebSocket } from './hooks/useWebSocket';
 
 const WS_URL = `ws://${window.location.hostname}:3001`;
-const API_URL = '';
+const API_URL = `http://${window.location.hostname}:3001`;
 
 const useStyles = makeStyles({
   root: {
