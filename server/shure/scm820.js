@@ -26,6 +26,8 @@ class SCM820Client extends EventEmitter {
     this.reconnectTimer = null;
     this.buffer = '';
     this.channelState = {};
+    // Tracks when each channel's gate last opened: { [channel]: Date }
+    this.lastActiveAt = {};
 
     // Initialize channel state from config
     for (let ch = 1; ch <= 8; ch++) {
@@ -119,10 +121,16 @@ class SCM820Client extends EventEmitter {
       case 'AUDIO_MUTE':
         this.channelState[channel].muted = value === 'ON';
         break;
-      case 'AUDIO_GATE':
-        this.channelState[channel].gateOpen = value === 'OPEN';
-        this.channelState[channel].active = value === 'OPEN' && !this.channelState[channel].muted;
+      case 'AUDIO_GATE': {
+        const nowOpen = value === 'OPEN';
+        const wasOpen = this.channelState[channel].gateOpen;
+        this.channelState[channel].gateOpen = nowOpen;
+        this.channelState[channel].active = nowOpen && !this.channelState[channel].muted;
+        if (nowOpen && !wasOpen) {
+          this.lastActiveAt[channel] = new Date();
+        }
         break;
+      }
       case 'AUDIO_IN_LEVEL':
         this.channelState[channel].level = parseInt(value, 10) || 0;
         break;
@@ -187,6 +195,29 @@ class SCM820Client extends EventEmitter {
     return Object.values(this.channelState).filter((ch) => ch.active);
   }
 
+  // Best-guess speaker for transcription attribution:
+  // 1. If one channel is active → that one.
+  // 2. If multiple are active → pick highest audio level.
+  // 3. If none active → fall back to whoever spoke most recently (within windowMs).
+  getSpeaker(windowMs = 4000) {
+    const active = this.getActiveChannels();
+    if (active.length === 1) return active[0];
+    if (active.length > 1) {
+      return active.reduce((best, ch) => (ch.level > best.level ? ch : best));
+    }
+    // No gate open — use recency fallback
+    const cutoff = Date.now() - windowMs;
+    let recent = null;
+    for (const [ch, ts] of Object.entries(this.lastActiveAt)) {
+      if (ts.getTime() >= cutoff) {
+        if (!recent || ts > this.lastActiveAt[recent]) {
+          recent = ch;
+        }
+      }
+    }
+    return recent ? this.channelState[recent] : null;
+  }
+
   // Simulate mode for development without physical mixer
   startSimulation() {
     console.log('[SCM820] Running in SIMULATION mode');
@@ -200,10 +231,14 @@ class SCM820Client extends EventEmitter {
       const activeCh = (Math.floor(tick / 15) % 8) + 1;
       for (let ch = 1; ch <= 8; ch++) {
         const wasActive = this.channelState[ch].active;
-        this.channelState[ch].gateOpen = ch === activeCh;
-        this.channelState[ch].active = ch === activeCh;
-        this.channelState[ch].level = ch === activeCh ? 65 + Math.floor(Math.random() * 20) : 0;
-        if (wasActive !== this.channelState[ch].active) {
+        const nowActive = ch === activeCh;
+        this.channelState[ch].gateOpen = nowActive;
+        this.channelState[ch].active = nowActive;
+        this.channelState[ch].level = nowActive ? 65 + Math.floor(Math.random() * 20) : 0;
+        if (!wasActive && nowActive) {
+          this.lastActiveAt[ch] = new Date();
+        }
+        if (wasActive !== nowActive) {
           this.emit('channelUpdate', this.channelState[ch]);
         }
       }

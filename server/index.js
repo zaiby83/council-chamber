@@ -89,10 +89,7 @@ app.post('/api/channels/:ch/mute', (req, res) => {
 
 // Transcription control
 app.post('/api/transcription/start', (_, res) => {
-  transcriber.start(() => {
-    const active = mixer.getActiveChannels();
-    return active.length > 0 ? active[0] : null;
-  });
+  transcriber.start(() => mixer.getSpeaker());
   res.json({ ok: true });
 });
 
