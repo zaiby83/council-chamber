@@ -3,9 +3,41 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 const config = require('./config');
 const mixer = require('./shure/scm820');
 const transcriber = require('./transcription/azure-speech');
+
+// ── Member store (persisted to members.json) ────────────────────────────────
+const MEMBERS_FILE = path.join(__dirname, 'members.json');
+
+function loadMembers() {
+  try {
+    return JSON.parse(fs.readFileSync(MEMBERS_FILE, 'utf8'));
+  } catch {
+    // Fall back to config defaults
+    const defaults = {};
+    for (const [ch, m] of Object.entries(config.councilMembers)) {
+      defaults[ch] = { name: m.name, title: m.title };
+    }
+    return defaults;
+  }
+}
+
+function saveMembers(members) {
+  fs.writeFileSync(MEMBERS_FILE, JSON.stringify(members, null, 2));
+}
+
+// Apply member names to mixer channel state
+function applyMembers(members) {
+  for (const [ch, m] of Object.entries(members)) {
+    mixer.updateMember(parseInt(ch, 10), m.name, m.title);
+  }
+}
+
+let members = loadMembers();
+// Applied after mixer initialises (see Start section)
 
 const app = express();
 app.use(cors());
@@ -75,6 +107,28 @@ app.post('/api/simulate', (_, res) => {
   res.json({ ok: true, mode: 'simulation' });
 });
 
+// Get all member name/title assignments
+app.get('/api/members', (_, res) => {
+  res.json(members);
+});
+
+// Save updated member assignments
+app.put('/api/members', (req, res) => {
+  const updated = req.body;
+  // Basic validation: keys 1-8, each has name string
+  for (let ch = 1; ch <= 8; ch++) {
+    const m = updated[ch];
+    if (!m || typeof m.name !== 'string' || !m.name.trim()) {
+      return res.status(400).json({ error: `Channel ${ch} requires a name` });
+    }
+  }
+  members = updated;
+  saveMembers(members);
+  applyMembers(members);
+  broadcast('members:updated', members);
+  res.json({ ok: true, members });
+});
+
 // ── Mixer events → WebSocket ────────────────────────────────────────────────
 mixer.on('connected', () => broadcast('mixer:connected', {}));
 mixer.on('disconnected', () => broadcast('mixer:disconnected', {}));
@@ -124,7 +178,8 @@ server.listen(config.server.port, () => {
   console.log(`   Server running on http://localhost:${config.server.port}`);
   console.log(`   WebSocket on ws://localhost:${config.server.port}\n`);
 
-  // Try to connect to mixer; fall back to simulation if it fails after 5s
+  // Apply persisted member names then connect
+  applyMembers(members);
   mixer.connect();
   setTimeout(() => {
     if (!mixer.connected) {

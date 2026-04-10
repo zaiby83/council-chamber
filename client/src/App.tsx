@@ -121,6 +121,15 @@ export default function App() {
         setInterimText('');
         setInterimSpeaker('');
         break;
+
+      case 'members:updated':
+        setChannels((prev) =>
+          prev.map((c) => {
+            const m = payload[c.channel];
+            return m ? { ...c, name: m.name, title: m.title } : c;
+          })
+        );
+        break;
     }
   }, [lastMessage]);
 
@@ -140,6 +149,18 @@ export default function App() {
     await fetch(`${API_URL}/api/transcription/stop`, { method: 'POST' });
   }, []);
 
+  const handleSaveMembers = useCallback(async (
+    updated: Record<number, { name: string; title: string }>
+  ) => {
+    const res = await fetch(`${API_URL}/api/members`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated),
+    });
+    if (!res.ok) throw new Error('Failed to save members');
+    // Server broadcasts members:updated — channel states will update via WS
+  }, []);
+
   return (
     <div className={styles.root}>
       <MeetingHeader
@@ -154,6 +175,7 @@ export default function App() {
             channels={channels}
             mixerConnected={mixerConnected}
             onMuteToggle={handleMuteToggle}
+            onSaveMembers={handleSaveMembers}
           />
         </div>
         <div className={styles.transcript}>

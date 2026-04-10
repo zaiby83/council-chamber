@@ -161,6 +161,15 @@ class SCM820Client extends EventEmitter {
     }
   }
 
+  updateMember(channel, name, title) {
+    if (!this.channelState[channel]) return;
+    this.channelState[channel].name = name;
+    this.channelState[channel].title = title || '';
+    // Sync name to mixer hardware (max 31 chars)
+    this._send(`SET ${channel} CHAN_NAME ${name.substring(0, 31)}`);
+    this.emit('channelUpdate', this.channelState[channel]);
+  }
+
   muteChannel(channel, mute) {
     this._send(`SET ${channel} AUDIO_MUTE ${mute ? 'ON' : 'OFF'}`);
   }
