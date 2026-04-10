@@ -87,6 +87,46 @@ app.post('/api/transcription/stop', (_, res) => {
   res.json({ ok: true });
 });
 
+// Current source status
+app.get('/api/status', (_, res) => {
+  res.json({
+    sourceType: source.sourceType,
+    connected: source.connected,
+    supportsMembers: source.supportsMembers,
+  });
+});
+
+// Switch audio source at runtime
+app.post('/api/configure', (req, res) => {
+  const { source: sourceType, ip, port, meetingId } = req.body;
+  if (!['scm820', 'zoom', 'simulation'].includes(sourceType)) {
+    return res.status(400).json({ error: 'Unknown source type' });
+  }
+
+  source.disconnect();
+  source.removeAllListeners();
+
+  source = createSource(sourceType, { members, app, ip, port, meetingId });
+  wireSource(source);
+  source.connect();
+
+  // SCM820 fallback to simulation after 5s if unreachable
+  if (sourceType === 'scm820') {
+    setTimeout(() => {
+      if (!source.connected) {
+        console.log('[SCM820] Unreachable — falling back to simulation');
+        source.disconnect();
+        source.removeAllListeners();
+        source = createSource('simulation', { members });
+        wireSource(source);
+        source.connect();
+      }
+    }, 5000);
+  }
+
+  res.json({ ok: true, sourceType, supportsMembers: source.supportsMembers });
+});
+
 // Member name editing (only meaningful for sources that support it)
 app.get('/api/members', (_, res) => {
   if (!source.supportsMembers) return res.json({});
@@ -114,10 +154,13 @@ app.put('/api/members', (req, res) => {
   res.json({ ok: true, members });
 });
 
-// ── Source events → WebSocket ────────────────────────────────────────────────
-source.on('connected', () => broadcast('mixer:connected', { sourceType: source.sourceType }));
-source.on('disconnected', () => broadcast('mixer:disconnected', {}));
-source.on('channelUpdate', (ch) => broadcast('channel:update', ch));
+// ── Source event wiring (extracted so we can rewire after configure) ─────────
+function wireSource(src) {
+  src.on('connected', () => broadcast('mixer:connected', { sourceType: src.sourceType }));
+  src.on('disconnected', () => broadcast('mixer:disconnected', {}));
+  src.on('channelUpdate', (ch) => broadcast('channel:update', ch));
+}
+wireSource(source);
 
 // ── Transcription events → WebSocket ─────────────────────────────────────────
 transcriber.on('transcript', (entry) => broadcast('transcript:final', entry));
@@ -164,17 +207,14 @@ server.listen(config.server.port, () => {
 
   source.connect();
 
-  // SCM820: fall back to simulation after 5s if unreachable
   if (config.audioSource === 'scm820') {
     setTimeout(() => {
       if (!source.connected) {
         console.log('[SCM820] Unreachable — falling back to simulation');
         source.disconnect();
         source.removeAllListeners();
-        source = createSource('simulation', { members, app });
-        source.on('connected', () => broadcast('mixer:connected', { sourceType: source.sourceType }));
-        source.on('disconnected', () => broadcast('mixer:disconnected', {}));
-        source.on('channelUpdate', (ch) => broadcast('channel:update', ch));
+        source = createSource('simulation', { members });
+        wireSource(source);
         source.connect();
       }
     }, 5000);

@@ -11,16 +11,18 @@ const SCM820Source = require('./scm820');
 const SimulationSource = require('./simulation');
 const ZoomSource = require('./zoom');
 
-function createSource(type, { members = {}, app = null } = {}) {
+function createSource(type, { members = {}, app = null, ip, port, meetingId } = {}) {
   switch (type) {
-    case 'zoom':
+    case 'zoom': {
       if (!app) throw new Error('Zoom source requires the Express app instance');
+      if (meetingId) process.env.ZOOM_MEETING_ID = meetingId;
       return new ZoomSource(app);
+    }
     case 'simulation':
       return new SimulationSource(members);
     case 'scm820':
     default:
-      return new SCM820Source(members);
+      return new SCM820Source(members, { ip, port });
   }
 }
 

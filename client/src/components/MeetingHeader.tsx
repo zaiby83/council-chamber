@@ -2,10 +2,11 @@ import React from 'react';
 import {
   Text,
   Badge,
+  Button,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { MicRegular, RecordStopRegular } from '@fluentui/react-icons';
+import { MicRegular, ArrowResetRegular } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
   header: {
@@ -78,6 +79,7 @@ interface Props {
   chamberName: string;
   transcriptionRunning: boolean;
   mixerConnected: boolean;
+  onNewMeeting: () => void;
 }
 
 export const MeetingHeader: React.FC<Props> = ({
@@ -85,6 +87,7 @@ export const MeetingHeader: React.FC<Props> = ({
   chamberName,
   transcriptionRunning,
   mixerConnected,
+  onNewMeeting,
 }) => {
   const styles = useStyles();
   const [time, setTime] = React.useState(new Date());
@@ -114,6 +117,14 @@ export const MeetingHeader: React.FC<Props> = ({
             Live Transcript
           </div>
         )}
+        <Button
+          icon={<ArrowResetRegular />}
+          appearance="subtle"
+          size="small"
+          onClick={onNewMeeting}
+          style={{ color: 'rgba(255,255,255,0.75)' }}
+          title="New meeting"
+        />
       </div>
     </header>
   );

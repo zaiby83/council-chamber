@@ -14,7 +14,7 @@ const AudioSource = require('./base');
 const config = require('../config');
 
 class SCM820Source extends AudioSource {
-  constructor(members) {
+  constructor(members, { ip, port } = {}) {
     super();
     this.sourceType = 'scm820';
     this.supportsMembers = true;
@@ -24,6 +24,8 @@ class SCM820Source extends AudioSource {
     this.channelState = {};
     this.lastActiveAt = {};
     this._members = members;
+    this._ip = ip || config.shure.ip;
+    this._port = port || config.shure.port;
 
     for (let ch = 1; ch <= 8; ch++) {
       const m = members[ch] || {};
@@ -41,10 +43,10 @@ class SCM820Source extends AudioSource {
 
   connect() {
     if (this.connected) return;
-    console.log(`[SCM820] Connecting to ${config.shure.ip}:${config.shure.port}...`);
+    console.log(`[SCM820] Connecting to ${this._ip}:${this._port}...`);
     this.client = new net.Socket();
 
-    this.client.connect(config.shure.port, config.shure.ip, () => {
+    this.client.connect(this._port, this._ip, () => {
       this.connected = true;
       console.log('[SCM820] Connected');
       this.emit('connected');

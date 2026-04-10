@@ -3,6 +3,7 @@ import { makeStyles, tokens } from '@fluentui/react-components';
 import { MeetingHeader } from './components/MeetingHeader';
 import { MixerPanel } from './components/MixerPanel';
 import { TranscriptPanel, TranscriptEntry } from './components/TranscriptPanel';
+import { SetupWizard } from './components/setup/SetupWizard';
 import { useWebSocket } from './hooks/useWebSocket';
 
 const WS_URL = `ws://${window.location.hostname}:3001`;
@@ -43,9 +44,16 @@ interface ChannelState {
   active: boolean;
 }
 
+const SESSION_KEY = 'cc_session_active';
+
 export default function App() {
   const styles = useStyles();
   const { lastMessage, send } = useWebSocket(WS_URL);
+
+  // Show wizard until setup is complete; persist across hot-reload but not refresh
+  const [setupDone, setSetupDone] = useState(
+    () => sessionStorage.getItem(SESSION_KEY) === 'true'
+  );
 
   const [cityName, setCityName] = useState('City of Fairfield');
   const [chamberName, setChamberName] = useState('Council Chamber');
@@ -57,6 +65,19 @@ export default function App() {
   const [interimSpeaker, setInterimSpeaker] = useState('');
   const entryCounter = useRef(0);
 
+  const handleSetupComplete = () => {
+    sessionStorage.setItem(SESSION_KEY, 'true');
+    setSetupDone(true);
+  };
+
+  const handleNewMeeting = () => {
+    sessionStorage.removeItem(SESSION_KEY);
+    setTranscriptEntries([]);
+    setInterimText('');
+    setInterimSpeaker('');
+    setSetupDone(false);
+  };
+
   // Process incoming WebSocket messages
   useEffect(() => {
     if (!lastMessage) return;
@@ -66,6 +87,7 @@ export default function App() {
       case 'init':
         setChannels(payload.channels ?? []);
         setTranscriptionRunning(payload.transcriptionRunning ?? false);
+        setMixerConnected(payload.channels?.length > 0);
         if (payload.meeting) {
           setCityName(payload.meeting.cityName);
           setChamberName(payload.meeting.chamberName);
@@ -135,7 +157,6 @@ export default function App() {
 
   const handleMuteToggle = useCallback((channel: number, muted: boolean) => {
     send('mute', { channel, muted });
-    // Optimistic update
     setChannels((prev) =>
       prev.map((c) => (c.channel === channel ? { ...c, muted } : c))
     );
@@ -158,37 +179,41 @@ export default function App() {
       body: JSON.stringify(updated),
     });
     if (!res.ok) throw new Error('Failed to save members');
-    // Server broadcasts members:updated — channel states will update via WS
   }, []);
 
   return (
-    <div className={styles.root}>
-      <MeetingHeader
-        cityName={cityName}
-        chamberName={chamberName}
-        transcriptionRunning={transcriptionRunning}
-        mixerConnected={mixerConnected}
-      />
-      <div className={styles.body}>
-        <div className={styles.mixer}>
-          <MixerPanel
-            channels={channels}
-            mixerConnected={mixerConnected}
-            onMuteToggle={handleMuteToggle}
-            onSaveMembers={handleSaveMembers}
-          />
-        </div>
-        <div className={styles.transcript}>
-          <TranscriptPanel
-            entries={transcriptEntries}
-            interimText={interimText}
-            interimSpeaker={interimSpeaker}
-            running={transcriptionRunning}
-            onStart={handleStartTranscription}
-            onStop={handleStopTranscription}
-          />
+    <>
+      {!setupDone && <SetupWizard onComplete={handleSetupComplete} />}
+
+      <div className={styles.root}>
+        <MeetingHeader
+          cityName={cityName}
+          chamberName={chamberName}
+          transcriptionRunning={transcriptionRunning}
+          mixerConnected={mixerConnected}
+          onNewMeeting={handleNewMeeting}
+        />
+        <div className={styles.body}>
+          <div className={styles.mixer}>
+            <MixerPanel
+              channels={channels}
+              mixerConnected={mixerConnected}
+              onMuteToggle={handleMuteToggle}
+              onSaveMembers={handleSaveMembers}
+            />
+          </div>
+          <div className={styles.transcript}>
+            <TranscriptPanel
+              entries={transcriptEntries}
+              interimText={interimText}
+              interimSpeaker={interimSpeaker}
+              running={transcriptionRunning}
+              onStart={handleStartTranscription}
+              onStop={handleStopTranscription}
+            />
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
