@@ -26,6 +26,7 @@ class SCM820Source extends AudioSource {
     this._members = members;
     this._ip = ip || config.shure.ip;
     this._port = port || config.shure.port;
+    this._disconnected = false;
 
     for (let ch = 1; ch <= 8; ch++) {
       const m = members[ch] || {};
@@ -60,6 +61,7 @@ class SCM820Source extends AudioSource {
     });
 
     this.client.on('close', () => {
+      if (this._disconnected) return;
       this.connected = false;
       console.log('[SCM820] Disconnected. Reconnecting in 5s…');
       this.emit('disconnected');
@@ -68,12 +70,14 @@ class SCM820Source extends AudioSource {
     });
 
     this.client.on('error', (err) => {
+      if (this._disconnected) return;
       console.error('[SCM820] Error:', err.message);
       this.emit('error', err);
     });
   }
 
   disconnect() {
+    this._disconnected = true;
     this._stopPolling();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.client) { this.client.destroy(); this.client = null; }

@@ -19,10 +19,12 @@ class AudioSource extends EventEmitter {
   constructor() {
     super();
     this.connected = false;
-    // Whether this source supports custom name/title editing via members.json
     this.supportsMembers = false;
-    // Human-readable source type shown in the UI
     this.sourceType = 'unknown';
+    // Default error handler — prevents unhandled 'error' event crashes
+    this.on('error', (err) => {
+      console.error(`[${this.sourceType}] Error:`, err.message);
+    });
   }
 
   connect() { throw new Error('connect() not implemented'); }
