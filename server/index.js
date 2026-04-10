@@ -6,7 +6,7 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const config = require('./config');
-const mixer = require('./shure/scm820');
+const { createSource } = require('./sources');
 const transcriber = require('./transcription/azure-speech');
 
 // ── Member store (persisted to members.json) ────────────────────────────────
@@ -16,7 +16,6 @@ function loadMembers() {
   try {
     return JSON.parse(fs.readFileSync(MEMBERS_FILE, 'utf8'));
   } catch {
-    // Fall back to config defaults
     const defaults = {};
     for (const [ch, m] of Object.entries(config.councilMembers)) {
       defaults[ch] = { name: m.name, title: m.title };
@@ -29,16 +28,9 @@ function saveMembers(members) {
   fs.writeFileSync(MEMBERS_FILE, JSON.stringify(members, null, 2));
 }
 
-// Apply member names to mixer channel state
-function applyMembers(members) {
-  for (const [ch, m] of Object.entries(members)) {
-    mixer.updateMember(parseInt(ch, 10), m.name, m.title);
-  }
-}
-
 let members = loadMembers();
-// Applied after mixer initialises (see Start section)
 
+// ── Express + WebSocket ──────────────────────────────────────────────────────
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -46,50 +38,47 @@ app.use(express.json());
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// ── WebSocket broadcast helper ──────────────────────────────────────────────
 function broadcast(type, payload) {
   const msg = JSON.stringify({ type, payload, ts: new Date().toISOString() });
   wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(msg);
-    }
+    if (client.readyState === WebSocket.OPEN) client.send(msg);
   });
 }
 
-// ── REST API ────────────────────────────────────────────────────────────────
+// ── Audio source ─────────────────────────────────────────────────────────────
+// Pass app so Zoom can register its webhook route before the server starts
+let source = createSource(config.audioSource, { members, app });
 
-// Meeting info
+console.log(`[Source] Using: ${config.audioSource}`);
+
+// ── REST API ─────────────────────────────────────────────────────────────────
+
 app.get('/api/meeting', (_, res) => {
   res.json({
     cityName: config.meeting.cityName,
     chamberName: config.meeting.chamberName,
-    councilMembers: config.councilMembers,
+    sourceType: source.sourceType,
+    supportsMembers: source.supportsMembers,
   });
 });
 
-// All channel states
-app.get('/api/channels', (_, res) => {
-  res.json(mixer.getAllChannels());
-});
+app.get('/api/channels', (_, res) => res.json(source.getAllChannels()));
 
-// Single channel state
 app.get('/api/channels/:ch', (req, res) => {
-  const state = mixer.getChannelState(parseInt(req.params.ch, 10));
+  const state = source.getChannelState(parseInt(req.params.ch, 10));
   if (!state) return res.status(404).json({ error: 'Channel not found' });
   res.json(state);
 });
 
-// Mute/unmute a channel
 app.post('/api/channels/:ch/mute', (req, res) => {
   const ch = parseInt(req.params.ch, 10);
   const { muted } = req.body;
-  mixer.muteChannel(ch, muted);
+  source.muteChannel(ch, muted);
   res.json({ ok: true, channel: ch, muted });
 });
 
-// Transcription control
 app.post('/api/transcription/start', (_, res) => {
-  transcriber.start(() => mixer.getSpeaker());
+  transcriber.start(() => source.getSpeaker());
   res.json({ ok: true });
 });
 
@@ -98,55 +87,54 @@ app.post('/api/transcription/stop', (_, res) => {
   res.json({ ok: true });
 });
 
-// Simulation mode (dev without physical mixer)
-app.post('/api/simulate', (_, res) => {
-  mixer.startSimulation();
-  res.json({ ok: true, mode: 'simulation' });
-});
-
-// Get all member name/title assignments
+// Member name editing (only meaningful for sources that support it)
 app.get('/api/members', (_, res) => {
+  if (!source.supportsMembers) return res.json({});
   res.json(members);
 });
 
-// Save updated member assignments
 app.put('/api/members', (req, res) => {
+  if (!source.supportsMembers) {
+    return res.status(400).json({ error: 'Current source does not support member editing' });
+  }
   const updated = req.body;
-  // Basic validation: keys 1-8, each has name string
-  for (let ch = 1; ch <= 8; ch++) {
-    const m = updated[ch];
+  const channels = source.getAllChannels();
+  for (const ch of channels) {
+    const m = updated[ch.channel];
     if (!m || typeof m.name !== 'string' || !m.name.trim()) {
-      return res.status(400).json({ error: `Channel ${ch} requires a name` });
+      return res.status(400).json({ error: `Channel ${ch.channel} requires a name` });
     }
   }
   members = updated;
   saveMembers(members);
-  applyMembers(members);
+  for (const [ch, m] of Object.entries(members)) {
+    source.updateMember(parseInt(ch, 10), m.name, m.title);
+  }
   broadcast('members:updated', members);
   res.json({ ok: true, members });
 });
 
-// ── Mixer events → WebSocket ────────────────────────────────────────────────
-mixer.on('connected', () => broadcast('mixer:connected', {}));
-mixer.on('disconnected', () => broadcast('mixer:disconnected', {}));
-mixer.on('channelUpdate', (channel) => broadcast('channel:update', channel));
+// ── Source events → WebSocket ────────────────────────────────────────────────
+source.on('connected', () => broadcast('mixer:connected', { sourceType: source.sourceType }));
+source.on('disconnected', () => broadcast('mixer:disconnected', {}));
+source.on('channelUpdate', (ch) => broadcast('channel:update', ch));
 
-// ── Transcription events → WebSocket ────────────────────────────────────────
+// ── Transcription events → WebSocket ─────────────────────────────────────────
 transcriber.on('transcript', (entry) => broadcast('transcript:final', entry));
 transcriber.on('interim', (entry) => broadcast('transcript:interim', entry));
 transcriber.on('started', () => broadcast('transcription:started', {}));
 transcriber.on('stopped', () => broadcast('transcription:stopped', {}));
 
-// ── WebSocket connection ─────────────────────────────────────────────────────
+// ── WebSocket connection ──────────────────────────────────────────────────────
 wss.on('connection', (ws) => {
   console.log('[WS] Client connected');
-
-  // Send full state on connect
   ws.send(JSON.stringify({
     type: 'init',
     payload: {
-      channels: mixer.getAllChannels(),
+      channels: source.getAllChannels(),
       transcriptionRunning: transcriber.isRunning(),
+      sourceType: source.sourceType,
+      supportsMembers: source.supportsMembers,
       meeting: {
         cityName: config.meeting.cityName,
         chamberName: config.meeting.chamberName,
@@ -158,9 +146,7 @@ wss.on('connection', (ws) => {
   ws.on('message', (msg) => {
     try {
       const { type, payload } = JSON.parse(msg);
-      if (type === 'mute') {
-        mixer.muteChannel(payload.channel, payload.muted);
-      }
+      if (type === 'mute') source.muteChannel(payload.channel, payload.muted);
     } catch (e) {
       console.error('[WS] Bad message:', e.message);
     }
@@ -169,19 +155,28 @@ wss.on('connection', (ws) => {
   ws.on('close', () => console.log('[WS] Client disconnected'));
 });
 
-// ── Start ────────────────────────────────────────────────────────────────────
+// ── Start ─────────────────────────────────────────────────────────────────────
 server.listen(config.server.port, () => {
   console.log(`\n🏛  ${config.meeting.cityName} — ${config.meeting.chamberName}`);
-  console.log(`   Server running on http://localhost:${config.server.port}`);
-  console.log(`   WebSocket on ws://localhost:${config.server.port}\n`);
+  console.log(`   Server:    http://localhost:${config.server.port}`);
+  console.log(`   WebSocket: ws://localhost:${config.server.port}`);
+  console.log(`   Source:    ${config.audioSource}\n`);
 
-  // Apply persisted member names then connect
-  applyMembers(members);
-  mixer.connect();
-  setTimeout(() => {
-    if (!mixer.connected) {
-      console.log('[SCM820] Could not reach mixer — starting simulation mode');
-      mixer.startSimulation();
-    }
-  }, 5000);
+  source.connect();
+
+  // SCM820: fall back to simulation after 5s if unreachable
+  if (config.audioSource === 'scm820') {
+    setTimeout(() => {
+      if (!source.connected) {
+        console.log('[SCM820] Unreachable — falling back to simulation');
+        source.disconnect();
+        source.removeAllListeners();
+        source = createSource('simulation', { members, app });
+        source.on('connected', () => broadcast('mixer:connected', { sourceType: source.sourceType }));
+        source.on('disconnected', () => broadcast('mixer:disconnected', {}));
+        source.on('channelUpdate', (ch) => broadcast('channel:update', ch));
+        source.connect();
+      }
+    }, 5000);
+  }
 });

@@ -12,6 +12,7 @@ module.exports = {
   server: {
     port: parseInt(process.env.PORT || '3001', 10),
   },
+  audioSource: process.env.AUDIO_SOURCE || 'scm820',
   meeting: {
     cityName: process.env.CITY_NAME || 'City of Fairfield',
     chamberName: process.env.CHAMBER_NAME || 'Council Chamber',
