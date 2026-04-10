@@ -7,7 +7,7 @@ import {
   Divider,
   Spinner,
 } from '@fluentui/react-components';
-import { EditRegular, CheckmarkRegular, DismissRegular } from '@fluentui/react-icons';
+import { EditRegular, CheckmarkRegular, DismissRegular, PlugDisconnectedRegular } from '@fluentui/react-icons';
 import { CouncilMemberCard } from './CouncilMemberCard';
 
 const useStyles = makeStyles({
@@ -52,6 +52,21 @@ const useStyles = makeStyles({
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
     gap: '10px',
+  },
+  offline: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+    gap: '10px',
+    color: tokens.colorNeutralForeground3,
+    padding: '40px',
+    textAlign: 'center',
+  },
+  offlineIcon: {
+    fontSize: '40px',
+    opacity: 0.4,
   },
 });
 
@@ -116,6 +131,18 @@ export const MixerPanel: React.FC<Props> = ({ channels, mixerConnected, onMuteTo
 
   const council = displayChannels.filter((c) => c.channel <= 5);
   const staff = displayChannels.filter((c) => c.channel > 5);
+
+  if (!mixerConnected && channels.length === 0) {
+    return (
+      <div className={styles.panel}>
+        <div className={styles.offline}>
+          <PlugDisconnectedRegular className={styles.offlineIcon} />
+          <Text weight="semibold">Mixer Offline</Text>
+          <Text size={200}>Waiting for Shure SCM820 connection…</Text>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.panel}>

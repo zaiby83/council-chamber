@@ -5,8 +5,8 @@ import { MixerPanel } from './components/MixerPanel';
 import { TranscriptPanel, TranscriptEntry } from './components/TranscriptPanel';
 import { useWebSocket } from './hooks/useWebSocket';
 
-const WS_URL = 'ws://localhost:3001';
-const API_URL = 'http://localhost:3001';
+const WS_URL = `ws://${window.location.hostname}:3001`;
+const API_URL = '';
 
 const useStyles = makeStyles({
   root: {
