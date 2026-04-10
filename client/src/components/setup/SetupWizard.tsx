@@ -5,7 +5,6 @@ import {
   Spinner,
   makeStyles,
   tokens,
-  Divider,
 } from '@fluentui/react-components';
 import {
   ArrowRightRegular,
@@ -60,7 +59,6 @@ const useStyles = makeStyles({
   steps: {
     display: 'flex',
     alignItems: 'center',
-    gap: '0',
     padding: '0 32px',
     background: tokens.colorNeutralBackground1,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -102,10 +100,10 @@ const useStyles = makeStyles({
     fontWeight: '600',
   },
   stepDivider: {
-    flex: 0,
     width: '24px',
     height: '1px',
     background: tokens.colorNeutralStroke1,
+    flexShrink: 0,
   },
   body: {
     flex: 1,
@@ -118,7 +116,6 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: '12px',
   },
   connecting: {
     display: 'flex',
@@ -126,6 +123,7 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: '16px',
     padding: '24px 0',
+    textAlign: 'center',
   },
   connectedMsg: {
     display: 'flex',
@@ -134,12 +132,14 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteGreenForeground3,
     fontWeight: '600',
   },
+  errorText: {
+    color: tokens.colorPaletteRedForeground1,
+    marginTop: '12px',
+    display: 'block',
+  },
 });
 
 type Step = 'source' | 'config' | 'names' | 'connecting';
-
-const STEP_ORDER: Step[] = ['source', 'config', 'names', 'connecting'];
-const STEP_LABELS = ['Source', 'Configure', 'Names', 'Connect'];
 
 interface Props {
   onComplete: () => void;
@@ -162,7 +162,7 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
     return defaults;
   });
   const [supportsMembers, setSupportsMembers] = useState(true);
-  const [connecting, setConnecting] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState('');
 
@@ -182,19 +182,39 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
       .catch(() => {});
   }, []);
 
-  // Listen for mixer:connected over WS to advance from connecting step
+  // When we reach the connecting step, immediately poll status in case
+  // the source already connected (simulation is instant).
   useEffect(() => {
-    if (!lastMessage) return;
-    if (lastMessage.type === 'mixer:connected' && step === 'connecting') {
+    if (step !== 'connecting' || connected) return;
+    fetch(`${API_URL}/api/status`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.connected) {
+          setConnected(true);
+          setTimeout(onComplete, 800);
+        }
+      })
+      .catch(() => {});
+  }, [step, connected, onComplete]);
+
+  // Also listen for mixer:connected over WS (for slower sources like SCM820)
+  useEffect(() => {
+    if (!lastMessage || step !== 'connecting' || connected) return;
+    if (lastMessage.type === 'mixer:connected') {
       setConnected(true);
-      setTimeout(onComplete, 900);
+      setTimeout(onComplete, 800);
     }
-  }, [lastMessage, step, onComplete]);
+  }, [lastMessage, step, connected, onComplete]);
 
-  const stepIndex = STEP_ORDER.indexOf(step);
+  // ── Step flow ───────────────────────────────────────────────────────────────
+  //
+  // SCM820 / Zoom:  source → config → [configure API] → names* → connecting
+  // Simulation:     source → [configure API] → names → connecting
+  //
+  // * names step only shown when supportsMembers === true
 
-  const sendConfigure = useCallback(async () => {
-    setConnecting(true);
+  const configure = useCallback(async () => {
+    setBusy(true);
     setError('');
     try {
       const res = await fetch(`${API_URL}/api/configure`, {
@@ -202,7 +222,7 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           source,
-          ip: sourceConfig.ip,
+          ip: sourceConfig.ip || undefined,
           port: sourceConfig.port ? parseInt(sourceConfig.port, 10) : undefined,
           meetingId: sourceConfig.meetingId || undefined,
         }),
@@ -210,54 +230,47 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Configure failed');
       setSupportsMembers(data.supportsMembers);
-
-      // Simulation connects instantly — check if we should skip names
-      if (source === 'simulation' && !data.supportsMembers) {
-        setTimeout(onComplete, 500);
-        return;
-      }
-      // Simulation with names, or other sources: advance to connecting
-      setStep('connecting');
+      // Always show names step when source supports it; otherwise go straight to connecting
+      setStep(data.supportsMembers ? 'names' : 'connecting');
     } catch (e: any) {
       setError(e.message);
-      setConnecting(false);
+    } finally {
+      setBusy(false);
     }
-  }, [source, sourceConfig, onComplete]);
+  }, [source, sourceConfig]);
 
-  const saveNamesAndConnect = useCallback(async () => {
-    setConnecting(true);
+  const saveAndConnect = useCallback(async () => {
+    setBusy(true);
     setError('');
     try {
-      await fetch(`${API_URL}/api/members`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(members),
-      });
+      if (supportsMembers) {
+        const res = await fetch(`${API_URL}/api/members`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(members),
+        });
+        if (!res.ok) throw new Error('Failed to save names');
+      }
       setStep('connecting');
     } catch (e: any) {
       setError(e.message);
-      setConnecting(false);
+    } finally {
+      setBusy(false);
     }
-  }, [members]);
+  }, [members, supportsMembers]);
 
   const handleNext = () => {
     if (step === 'source') {
-      // Simulation has no config — jump straight to names or connect
       if (source === 'simulation') {
-        setStep('names');
+        // Simulation has no config screen — configure immediately then go to names
+        configure();
       } else {
         setStep('config');
       }
       return;
     }
-    if (step === 'config') {
-      sendConfigure();
-      return;
-    }
-    if (step === 'names') {
-      saveNamesAndConnect();
-      return;
-    }
+    if (step === 'config') { configure(); return; }
+    if (step === 'names') { saveAndConnect(); return; }
   };
 
   const handleBack = () => {
@@ -266,7 +279,6 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
   };
 
   const canGoNext = () => {
-    if (step === 'source') return true;
     if (step === 'config' && source === 'scm820') return sourceConfig.ip.trim().length > 0;
     return true;
   };
@@ -277,12 +289,14 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
     return 'Continue';
   };
 
+  // Build visible step list dynamically
   const visibleSteps: { key: Step; label: string }[] = [
     { key: 'source', label: 'Source' },
     ...(source !== 'simulation' ? [{ key: 'config' as Step, label: 'Configure' }] : []),
-    { key: 'names', label: 'Names' },
+    ...(supportsMembers ? [{ key: 'names' as Step, label: 'Names' }] : []),
     { key: 'connecting', label: 'Connect' },
   ];
+  const currentIdx = visibleSteps.findIndex((s) => s.key === step);
 
   return (
     <div className={styles.overlay}>
@@ -296,8 +310,7 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
         {/* Step indicator */}
         <div className={styles.steps}>
           {visibleSteps.map((s, i) => {
-            const idx = visibleSteps.findIndex((x) => x.key === step);
-            const isDone = i < idx;
+            const isDone = i < currentIdx;
             const isActive = s.key === step;
             return (
               <React.Fragment key={s.key}>
@@ -330,7 +343,7 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
             <div className={styles.connecting}>
               {connected ? (
                 <div className={styles.connectedMsg}>
-                  <CheckmarkCircleRegular style={{ fontSize: '28px' }} />
+                  <CheckmarkCircleRegular style={{ fontSize: '32px' }} />
                   <Text size={500} weight="semibold">Connected — starting session…</Text>
                 </div>
               ) : (
@@ -338,18 +351,14 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
                   <Spinner size="large" label="Connecting to audio source…" />
                   {source === 'scm820' && (
                     <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-                      Trying {sourceConfig.ip}:{sourceConfig.port || '2202'} — will fall back to simulation after 5s if unreachable.
+                      Trying {sourceConfig.ip}:{sourceConfig.port || '2202'} — falls back to simulation after 5 s if unreachable.
                     </Text>
                   )}
                 </>
               )}
             </div>
           )}
-          {error && (
-            <Text style={{ color: tokens.colorPaletteRedForeground1, marginTop: '12px', display: 'block' }}>
-              {error}
-            </Text>
-          )}
+          {error && <Text className={styles.errorText}>{error}</Text>}
         </div>
 
         {/* Footer */}
@@ -359,16 +368,16 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
               icon={<ArrowLeftRegular />}
               appearance="subtle"
               onClick={handleBack}
-              disabled={step === 'source' || connecting}
+              disabled={step === 'source' || busy}
             >
               Back
             </Button>
             <Button
-              icon={connecting ? <Spinner size="tiny" /> : <ArrowRightRegular />}
+              icon={busy ? <Spinner size="tiny" /> : <ArrowRightRegular />}
               iconPosition="after"
               appearance="primary"
               onClick={handleNext}
-              disabled={!canGoNext() || connecting}
+              disabled={!canGoNext() || busy}
             >
               {nextLabel()}
             </Button>
