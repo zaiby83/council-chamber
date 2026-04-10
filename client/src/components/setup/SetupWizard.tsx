@@ -3,6 +3,8 @@ import {
   Text,
   Button,
   Spinner,
+  MessageBar,
+  MessageBarBody,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
@@ -18,6 +20,19 @@ import { useWebSocket } from '../../hooks/useWebSocket';
 
 const WS_URL = `ws://${window.location.hostname}:3001`;
 const API_URL = '';
+
+async function safeJson(res: Response) {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      res.ok
+        ? `Unexpected server response: ${text.slice(0, 120)}`
+        : `Server unreachable — is it running on port 3001? (${text.slice(0, 80)})`
+    );
+  }
+}
 
 const useStyles = makeStyles({
   overlay: {
@@ -165,11 +180,16 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
   const [busy, setBusy] = useState(false);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState('');
+  const [serverReachable, setServerReachable] = useState<boolean | null>(null);
 
-  // Pre-load existing member names from server
+  // Check server reachability and pre-load member names
   useEffect(() => {
-    fetch(`${API_URL}/api/members`)
-      .then((r) => r.json())
+    fetch(`${API_URL}/api/status`)
+      .then((r) => safeJson(r))
+      .then(() => {
+        setServerReachable(true);
+        return fetch(`${API_URL}/api/members`).then((r) => safeJson(r));
+      })
       .then((data) => {
         if (data && Object.keys(data).length > 0) {
           const mapped: Record<number, MemberEntry> = {};
@@ -179,7 +199,7 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
           setMembers(mapped);
         }
       })
-      .catch(() => {});
+      .catch(() => setServerReachable(false));
   }, []);
 
   // When we reach the connecting step, immediately poll status in case
@@ -187,7 +207,7 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
   useEffect(() => {
     if (step !== 'connecting' || connected) return;
     fetch(`${API_URL}/api/status`)
-      .then((r) => r.json())
+      .then((r) => safeJson(r))
       .then((data) => {
         if (data.connected) {
           setConnected(true);
@@ -227,7 +247,7 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
           meetingId: sourceConfig.meetingId || undefined,
         }),
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok) throw new Error(data.error || 'Configure failed');
       setSupportsMembers(data.supportsMembers);
       // Always show names step when source supports it; otherwise go straight to connecting
@@ -249,7 +269,8 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(members),
         });
-        if (!res.ok) throw new Error('Failed to save names');
+        const data = await safeJson(res);
+        if (!res.ok) throw new Error(data.error || 'Failed to save names');
       }
       setStep('connecting');
     } catch (e: any) {
@@ -330,6 +351,13 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
 
         {/* Body */}
         <div className={styles.body}>
+          {serverReachable === false && (
+            <MessageBar intent="error" style={{ marginBottom: '16px' }}>
+              <MessageBarBody>
+                Cannot reach the server on port 3001. Run <code>npm run dev</code> in the <code>server/</code> folder, then refresh.
+              </MessageBarBody>
+            </MessageBar>
+          )}
           {step === 'source' && (
             <SourceSelectStep selected={source} onChange={setSource} />
           )}

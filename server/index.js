@@ -98,33 +98,38 @@ app.get('/api/status', (_, res) => {
 
 // Switch audio source at runtime
 app.post('/api/configure', (req, res) => {
-  const { source: sourceType, ip, port, meetingId } = req.body;
-  if (!['scm820', 'zoom', 'simulation'].includes(sourceType)) {
-    return res.status(400).json({ error: 'Unknown source type' });
+  try {
+    const { source: sourceType, ip, port, meetingId } = req.body;
+    if (!['scm820', 'zoom', 'simulation'].includes(sourceType)) {
+      return res.status(400).json({ error: 'Unknown source type' });
+    }
+
+    source.disconnect();
+    source.removeAllListeners();
+
+    source = createSource(sourceType, { members, app, ip, port, meetingId });
+    wireSource(source);
+    source.connect();
+
+    // SCM820 fallback to simulation after 5s if unreachable
+    if (sourceType === 'scm820') {
+      setTimeout(() => {
+        if (!source.connected) {
+          console.log('[SCM820] Unreachable — falling back to simulation');
+          source.disconnect();
+          source.removeAllListeners();
+          source = createSource('simulation', { members });
+          wireSource(source);
+          source.connect();
+        }
+      }, 5000);
+    }
+
+    res.json({ ok: true, sourceType, supportsMembers: source.supportsMembers });
+  } catch (err) {
+    console.error('[configure] Error:', err.message);
+    res.status(500).json({ error: err.message });
   }
-
-  source.disconnect();
-  source.removeAllListeners();
-
-  source = createSource(sourceType, { members, app, ip, port, meetingId });
-  wireSource(source);
-  source.connect();
-
-  // SCM820 fallback to simulation after 5s if unreachable
-  if (sourceType === 'scm820') {
-    setTimeout(() => {
-      if (!source.connected) {
-        console.log('[SCM820] Unreachable — falling back to simulation');
-        source.disconnect();
-        source.removeAllListeners();
-        source = createSource('simulation', { members });
-        wireSource(source);
-        source.connect();
-      }
-    }, 5000);
-  }
-
-  res.json({ ok: true, sourceType, supportsMembers: source.supportsMembers });
 });
 
 // Member name editing (only meaningful for sources that support it)
