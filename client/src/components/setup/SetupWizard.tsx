@@ -6,6 +6,7 @@ import {
   MessageBar,
   MessageBarBody,
   makeStyles,
+  mergeClasses,
   tokens,
 } from '@fluentui/react-components';
 import {
@@ -170,6 +171,10 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
     ip: '192.168.1.100',
     port: '2202',
     meetingId: '',
+    language: 'en-US',
+    transcriptionProvider: 'browser',
+    azureKey: '',
+    azureRegion: 'westus2',
   });
   const [members, setMembers] = useState<Record<number, MemberEntry>>(() => {
     const defaults: Record<number, MemberEntry> = {};
@@ -251,6 +256,12 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
       if (!res.ok) throw new Error(data.error || 'Configure failed');
       setSupportsMembers(data.supportsMembers);
       // Always show names step when source supports it; otherwise go straight to connecting
+      // Persist transcription settings for App.tsx to read
+      sessionStorage.setItem('cc_language', sourceConfig.language);
+      sessionStorage.setItem('cc_transcription_provider', sourceConfig.transcriptionProvider);
+      if (sourceConfig.azureKey) sessionStorage.setItem('cc_azure_key', sourceConfig.azureKey);
+      if (sourceConfig.azureRegion) sessionStorage.setItem('cc_azure_region', sourceConfig.azureRegion);
+
       setStep(data.supportsMembers ? 'names' : 'connecting');
     } catch (e: any) {
       setError(e.message);
@@ -281,22 +292,14 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
   }, [members, supportsMembers]);
 
   const handleNext = () => {
-    if (step === 'source') {
-      if (source === 'simulation') {
-        // Simulation has no config screen — configure immediately then go to names
-        configure();
-      } else {
-        setStep('config');
-      }
-      return;
-    }
+    if (step === 'source') { setStep('config'); return; }
     if (step === 'config') { configure(); return; }
     if (step === 'names') { saveAndConnect(); return; }
   };
 
   const handleBack = () => {
     if (step === 'config') setStep('source');
-    if (step === 'names') setStep(source === 'simulation' ? 'source' : 'config');
+    if (step === 'names') setStep('config');
   };
 
   const canGoNext = () => {
@@ -305,7 +308,7 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
   };
 
   const nextLabel = () => {
-    if (step === 'config') return 'Connect';
+    if (step === 'config') return source === 'simulation' ? 'Continue' : 'Connect';
     if (step === 'names') return 'Start Meeting';
     return 'Continue';
   };
@@ -313,7 +316,7 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
   // Build visible step list dynamically
   const visibleSteps: { key: Step; label: string }[] = [
     { key: 'source', label: 'Source' },
-    ...(source !== 'simulation' ? [{ key: 'config' as Step, label: 'Configure' }] : []),
+    { key: 'config', label: source === 'simulation' ? 'Transcription' : 'Configure' },
     ...(supportsMembers ? [{ key: 'names' as Step, label: 'Names' }] : []),
     { key: 'connecting', label: 'Connect' },
   ];
@@ -337,10 +340,10 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
               <React.Fragment key={s.key}>
                 {i > 0 && <div className={styles.stepDivider} />}
                 <div className={styles.step}>
-                  <div className={`${styles.stepDot} ${isDone ? styles.stepDotDone : ''} ${isActive ? styles.stepDotActive : ''}`}>
+                  <div className={mergeClasses(styles.stepDot, isDone && styles.stepDotDone, isActive && styles.stepDotActive)}>
                     {isDone ? '✓' : i + 1}
                   </div>
-                  <Text className={`${styles.stepLabel} ${isActive ? styles.stepLabelActive : ''}`}>
+                  <Text className={mergeClasses(styles.stepLabel, isActive && styles.stepLabelActive)}>
                     {s.label}
                   </Text>
                 </div>

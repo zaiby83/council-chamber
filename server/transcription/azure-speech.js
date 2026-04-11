@@ -23,7 +23,7 @@ class AzureSpeechTranscriber extends EventEmitter {
     this.currentSpeaker = null;
   }
 
-  start(activeChannelResolver) {
+  start(activeChannelResolver, language = 'en-US') {
     if (this.running) return;
 
     if (!config.azure.speechKey) {
@@ -35,13 +35,20 @@ class AzureSpeechTranscriber extends EventEmitter {
       config.azure.speechKey,
       config.azure.speechRegion
     );
-    speechConfig.speechRecognitionLanguage = 'en-US';
+    speechConfig.speechRecognitionLanguage = language;
 
     // Enable profanity masking for public meetings
     speechConfig.setProfanity(sdk.ProfanityOption.Masked);
 
-    // Use default microphone (Dante Virtual Soundcard in production)
-    const audioConfig = sdk.AudioConfig.fromDefaultMicrophoneInput();
+    // Server-side mic only works with Dante Virtual Soundcard in production.
+    // In development, use the browser-based Azure transcription instead.
+    let audioConfig;
+    try {
+      audioConfig = sdk.AudioConfig.fromDefaultMicrophoneInput();
+    } catch (err) {
+      console.error('[Speech] Cannot open microphone on server — use browser-based transcription:', err.message);
+      return;
+    }
 
     this.recognizer = new sdk.SpeechRecognizer(speechConfig, audioConfig);
 

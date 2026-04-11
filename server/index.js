@@ -77,8 +77,30 @@ app.post('/api/channels/:ch/mute', (req, res) => {
   res.json({ ok: true, channel: ch, muted });
 });
 
-app.post('/api/transcription/start', (_, res) => {
-  transcriber.start(() => source.getSpeaker());
+// Issue a short-lived Azure Speech token so the browser never sees the raw key
+app.get('/api/transcription/token', async (_, res) => {
+  if (!config.azure.speechKey) {
+    return res.status(400).json({ error: 'AZURE_SPEECH_KEY not configured on server' });
+  }
+  try {
+    const tokenRes = await fetch(
+      `https://${config.azure.speechRegion}.api.cognitive.microsoft.com/sts/v1.0/issueToken`,
+      { method: 'POST', headers: { 'Ocp-Apim-Subscription-Key': config.azure.speechKey } }
+    );
+    if (!tokenRes.ok) {
+      const text = await tokenRes.text();
+      return res.status(tokenRes.status).json({ error: `Azure rejected key: ${text}` });
+    }
+    const token = await tokenRes.text();
+    res.json({ token, region: config.azure.speechRegion });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/transcription/start', (req, res) => {
+  const { language } = req.body || {};
+  transcriber.start(() => source.getSpeaker(), language || 'en-US');
   res.json({ ok: true });
 });
 
@@ -195,6 +217,9 @@ wss.on('connection', (ws) => {
     try {
       const { type, payload } = JSON.parse(msg);
       if (type === 'mute') source.muteChannel(payload.channel, payload.muted);
+      // Browser transcription — relay to all clients
+      if (type === 'transcript:submit') broadcast('transcript:final', payload);
+      if (type === 'transcript:interim:submit') broadcast('transcript:interim', payload);
     } catch (e) {
       console.error('[WS] Bad message:', e.message);
     }

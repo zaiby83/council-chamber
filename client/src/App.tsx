@@ -5,6 +5,8 @@ import { MixerPanel } from './components/MixerPanel';
 import { TranscriptPanel, TranscriptEntry } from './components/TranscriptPanel';
 import { SetupWizard } from './components/setup/SetupWizard';
 import { useWebSocket } from './hooks/useWebSocket';
+import { useBrowserTranscription } from './hooks/useBrowserTranscription';
+import { useAzureTranscription } from './hooks/useAzureTranscription';
 
 const WS_URL = `ws://${window.location.hostname}:3001`;
 const API_URL = `http://${window.location.hostname}:3001`;
@@ -50,7 +52,6 @@ export default function App() {
   const styles = useStyles();
   const { lastMessage, send } = useWebSocket(WS_URL);
 
-  // Show wizard until setup is complete; persist across hot-reload but not refresh
   const [setupDone, setSetupDone] = useState(
     () => sessionStorage.getItem(SESSION_KEY) === 'true'
   );
@@ -60,21 +61,72 @@ export default function App() {
   const [channels, setChannels] = useState<ChannelState[]>([]);
   const [mixerConnected, setMixerConnected] = useState(false);
   const [transcriptionRunning, setTranscriptionRunning] = useState(false);
+  const [transcriptionPaused, setTranscriptionPaused] = useState(false);
   const [transcriptEntries, setTranscriptEntries] = useState<TranscriptEntry[]>([]);
   const [interimText, setInterimText] = useState('');
   const [interimSpeaker, setInterimSpeaker] = useState('');
   const entryCounter = useRef(0);
 
+  // Language and provider — read from sessionStorage, kept as state so the
+  // language dropdown in the toolbar can update them live.
+  const [language, setLanguage] = useState(
+    () => sessionStorage.getItem('cc_language') || 'en-US'
+  );
+  const provider = (sessionStorage.getItem('cc_transcription_provider') || 'browser') as 'browser' | 'azure';
+
+  // Keep a live ref to channels so browser transcription callbacks can attribute speaker
+  const channelsRef = useRef<ChannelState[]>([]);
+  useEffect(() => { channelsRef.current = channels; }, [channels]);
+
+  const getActiveSpeaker = useCallback((): { speaker: string; speakerTitle: string } => {
+    const active = channelsRef.current.find((c) => c.gateOpen && !c.muted);
+    if (active) return { speaker: active.name, speakerTitle: active.title };
+    const byLevel = [...channelsRef.current]
+      .filter((c) => !c.muted)
+      .sort((a, b) => b.level - a.level);
+    if (byLevel[0]) return { speaker: byLevel[0].name, speakerTitle: byLevel[0].title };
+    return { speaker: 'Unknown', speakerTitle: '' };
+  }, []);
+
+  const onFinal = useCallback((text: string) => {
+    const { speaker, speakerTitle } = getActiveSpeaker();
+    send('transcript:submit', { text, speaker, speakerTitle, timestamp: new Date().toISOString() });
+  }, [getActiveSpeaker, send]);
+
+  const onInterim = useCallback((text: string) => {
+    const { speaker } = getActiveSpeaker();
+    send('transcript:interim:submit', { text, speaker });
+  }, [getActiveSpeaker, send]);
+
+  const onStateChange = useCallback((running: boolean) => {
+    setTranscriptionRunning(running);
+  }, []);
+
+  const browserTranscription = useBrowserTranscription({
+    language, onFinal, onInterim, onStateChange,
+  });
+
+  const azureTranscription = useAzureTranscription({
+    language, onFinal, onInterim, onStateChange,
+  });
+
+  const transcription = provider === 'azure' ? azureTranscription : browserTranscription;
+
   const handleSetupComplete = () => {
     sessionStorage.setItem(SESSION_KEY, 'true');
+    // Sync language state from whatever the wizard saved
+    const savedLang = sessionStorage.getItem('cc_language');
+    if (savedLang) setLanguage(savedLang);
     setSetupDone(true);
   };
 
   const handleNewMeeting = () => {
+    if (transcriptionRunning) transcription.stop();
     sessionStorage.removeItem(SESSION_KEY);
     setTranscriptEntries([]);
     setInterimText('');
     setInterimSpeaker('');
+    setTranscriptionPaused(false);
     setSetupDone(false);
   };
 
@@ -136,10 +188,12 @@ export default function App() {
 
       case 'transcription:started':
         setTranscriptionRunning(true);
+        setTranscriptionPaused(false);
         break;
 
       case 'transcription:stopped':
         setTranscriptionRunning(false);
+        setTranscriptionPaused(false);
         setInterimText('');
         setInterimSpeaker('');
         break;
@@ -162,13 +216,36 @@ export default function App() {
     );
   }, [send]);
 
-  const handleStartTranscription = useCallback(async () => {
-    await fetch(`${API_URL}/api/transcription/start`, { method: 'POST' });
-  }, []);
+  const handleStartTranscription = useCallback(() => {
+    setTranscriptionPaused(false);
+    transcription.start();
+  }, [transcription]);
 
-  const handleStopTranscription = useCallback(async () => {
-    await fetch(`${API_URL}/api/transcription/stop`, { method: 'POST' });
-  }, []);
+  const handlePauseTranscription = useCallback(() => {
+    setTranscriptionPaused(true);
+    setInterimText('');
+    setInterimSpeaker('');
+    transcription.stop();
+  }, [transcription]);
+
+  const handleResumeTranscription = useCallback(() => {
+    setTranscriptionPaused(false);
+    transcription.start();
+  }, [transcription]);
+
+  const handleStopTranscription = useCallback(() => {
+    setTranscriptionPaused(false);
+    transcription.stop();
+  }, [transcription]);
+
+  const handleLanguageChange = useCallback((lang: string) => {
+    setLanguage(lang);
+    sessionStorage.setItem('cc_language', lang);
+    if (transcriptionRunning && !transcriptionPaused) {
+      transcription.stop();
+      setTimeout(() => transcription.start(), 100);
+    }
+  }, [transcriptionRunning, transcriptionPaused, transcription]);
 
   const handleSaveMembers = useCallback(async (
     updated: Record<number, { name: string; title: string }>
@@ -208,8 +285,15 @@ export default function App() {
               interimText={interimText}
               interimSpeaker={interimSpeaker}
               running={transcriptionRunning}
+              paused={transcriptionPaused}
+              language={language}
+              supported={provider === 'azure' ? true : browserTranscription.supported}
+              micError={transcription.error}
               onStart={handleStartTranscription}
+              onPause={handlePauseTranscription}
+              onResume={handleResumeTranscription}
               onStop={handleStopTranscription}
+              onLanguageChange={handleLanguageChange}
             />
           </div>
         </div>

@@ -4,6 +4,7 @@ import {
   Badge,
   Button,
   makeStyles,
+  mergeClasses,
   tokens,
 } from '@fluentui/react-components';
 import { MicRegular, ArrowResetRegular } from '@fluentui/react-icons';
@@ -107,12 +108,12 @@ export const MeetingHeader: React.FC<Props> = ({
         <span className={styles.time}>
           {time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
         </span>
-        <div className={`${styles.statusBadge} ${styles.liveStatus}`}>
-          <span className={`${styles.dot} ${mixerConnected ? styles.dotLive : styles.dotOff}`} />
+        <div className={mergeClasses(styles.statusBadge, styles.liveStatus)}>
+          <span className={mergeClasses(styles.dot, mixerConnected ? styles.dotLive : styles.dotOff)} />
           {mixerConnected ? 'Mixer Connected' : 'Mixer Offline'}
         </div>
         {transcriptionRunning && (
-          <div className={`${styles.statusBadge} ${styles.liveStatus}`}>
+          <div className={mergeClasses(styles.statusBadge, styles.liveStatus)}>
             <MicRegular style={{ fontSize: '16px' }} />
             Live Transcript
           </div>

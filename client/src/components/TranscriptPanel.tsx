@@ -3,16 +3,20 @@ import {
   Text,
   Button,
   makeStyles,
+  mergeClasses,
   tokens,
   Badge,
-  Divider,
+  MessageBar,
+  MessageBarBody,
 } from '@fluentui/react-components';
 import {
   MicRegular,
   RecordStopRegular,
+  PauseRegular,
+  PlayRegular,
   CopyRegular,
-  ArrowDownRegular,
 } from '@fluentui/react-icons';
+import { LANGUAGES } from './setup/ConfigStep';
 
 const useStyles = makeStyles({
   panel: {
@@ -36,6 +40,15 @@ const useStyles = makeStyles({
     fontWeight: '700',
     flex: 1,
   },
+  langSelect: {
+    padding: '4px 8px',
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    background: tokens.colorNeutralBackground1,
+    fontSize: '13px',
+    color: tokens.colorNeutralForeground1,
+    cursor: 'pointer',
+  },
   entries: {
     flex: 1,
     overflowY: 'auto',
@@ -52,7 +65,6 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusMedium,
     background: tokens.colorNeutralBackground1,
     borderLeft: `3px solid ${tokens.colorBrandForeground1}`,
-    animation: 'fadeIn 0.2s ease',
   },
   interimEntry: {
     borderLeft: `3px solid ${tokens.colorNeutralStroke1}`,
@@ -98,6 +110,18 @@ const useStyles = makeStyles({
   adaBadge: {
     fontSize: '10px',
   },
+  pausedBanner: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '6px',
+    background: tokens.colorPaletteYellowBackground1,
+    color: tokens.colorPaletteYellowForeground2,
+    fontSize: '12px',
+    fontWeight: '600',
+    gap: '6px',
+    flexShrink: 0,
+  },
 });
 
 export interface TranscriptEntry {
@@ -114,8 +138,15 @@ interface Props {
   interimText: string;
   interimSpeaker: string;
   running: boolean;
+  paused: boolean;
+  language: string;
+  supported: boolean;
+  micError: string;
   onStart: () => void;
+  onPause: () => void;
+  onResume: () => void;
   onStop: () => void;
+  onLanguageChange: (lang: string) => void;
 }
 
 function formatTime(iso: string) {
@@ -131,8 +162,15 @@ export const TranscriptPanel: React.FC<Props> = ({
   interimText,
   interimSpeaker,
   running,
+  paused,
+  language,
+  supported,
+  micError,
   onStart,
+  onPause,
+  onResume,
   onStop,
+  onLanguageChange,
 }) => {
   const styles = useStyles();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -154,9 +192,24 @@ export const TranscriptPanel: React.FC<Props> = ({
         <Text className={styles.toolbarTitle} size={400}>
           Live Transcript
         </Text>
+
         <Badge className={styles.adaBadge} appearance="tint" color="informative">
           ADA Compliant
         </Badge>
+
+        {/* Language selector — disabled while actively recording */}
+        <select
+          className={styles.langSelect}
+          value={language}
+          disabled={running && !paused}
+          onChange={(e) => onLanguageChange(e.target.value)}
+          title="Transcription language"
+        >
+          {LANGUAGES.map((l) => (
+            <option key={l.code} value={l.code}>{l.label}</option>
+          ))}
+        </select>
+
         <Button
           icon={<CopyRegular />}
           appearance="subtle"
@@ -165,34 +218,85 @@ export const TranscriptPanel: React.FC<Props> = ({
           disabled={entries.length === 0}
           title="Copy transcript"
         />
-        {running ? (
-          <Button
-            icon={<RecordStopRegular />}
-            appearance="primary"
-            size="small"
-            onClick={onStop}
-            style={{ background: '#d32f2f' }}
-          >
-            Stop
-          </Button>
-        ) : (
+
+        {/* Three-state button group */}
+        {!running && !paused && (
           <Button
             icon={<MicRegular />}
             appearance="primary"
             size="small"
             onClick={onStart}
+            disabled={!supported}
+            title={!supported ? 'Speech recognition not supported in this browser' : undefined}
           >
-            Start Transcription
+            Start
           </Button>
         )}
+
+        {running && !paused && (
+          <Button
+            icon={<PauseRegular />}
+            appearance="primary"
+            size="small"
+            onClick={onPause}
+            style={{ background: tokens.colorPaletteYellowBackground3, color: '#000' }}
+          >
+            Pause
+          </Button>
+        )}
+
+        {paused && (
+          <>
+            <Button
+              icon={<PlayRegular />}
+              appearance="primary"
+              size="small"
+              onClick={onResume}
+              style={{ background: tokens.colorPaletteGreenBackground3 }}
+            >
+              Resume
+            </Button>
+            <Button
+              icon={<RecordStopRegular />}
+              appearance="subtle"
+              size="small"
+              onClick={onStop}
+              style={{ color: tokens.colorPaletteRedForeground1 }}
+            >
+              Stop
+            </Button>
+          </>
+        )}
       </div>
+
+      {/* Error / not-supported banners */}
+      {!supported && (
+        <MessageBar intent="warning">
+          <MessageBarBody>
+            Speech recognition is not supported in this browser. Use Chrome or Edge for live transcription.
+          </MessageBarBody>
+        </MessageBar>
+      )}
+      {micError && (
+        <MessageBar intent="error">
+          <MessageBarBody>{micError}</MessageBarBody>
+        </MessageBar>
+      )}
+
+      {/* Paused banner */}
+      {paused && (
+        <div className={styles.pausedBanner}>
+          <PauseRegular />
+          Transcription paused — press Resume to continue
+        </div>
+      )}
 
       <div className={styles.entries}>
         {entries.length === 0 && !interimText && (
           <div className={styles.empty}>
             <MicRegular style={{ fontSize: '40px', opacity: 0.3 }} />
             <Text>No transcript yet.</Text>
-            <Text size={200}>Press "Start Transcription" to begin live captioning.</Text>
+            <Text size={200}>Press "Start" to begin live captioning.</Text>
           </div>
         )}
 
@@ -210,7 +314,7 @@ export const TranscriptPanel: React.FC<Props> = ({
         ))}
 
         {interimText && (
-          <div className={`${styles.entry} ${styles.interimEntry}`}>
+          <div className={mergeClasses(styles.entry, styles.interimEntry)}>
             <div className={styles.entryHeader}>
               <span className={styles.speaker}>{interimSpeaker || 'Speaking...'}</span>
             </div>

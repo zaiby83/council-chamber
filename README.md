@@ -1,130 +1,184 @@
 # Council Chamber
 
-Real-time audio monitoring and live transcription dashboard for city council chambers.
+Real-time audio monitoring and live transcription dashboard for city council meetings.
 
-Built for the **City of Fairfield** — connects to a Shure SCM820 IntelliMix automatic mixer over TCP, displays live mic gate/mute status for all 8 channels, and streams ADA-compliant transcription via Azure Cognitive Speech.
+Connects to a **Shure SCM820** automatic mixer (or runs in simulation), monitors microphone gate/mute status for up to 8 channels, and streams ADA-compliant live captions using either the browser's built-in speech engine or **Azure Cognitive Speech** (required for non-English languages).
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────┐        TCP :2202       ┌──────────────────┐
-│   React Dashboard   │◄──── WebSocket ────────►│   Node Server    │◄──────► Shure SCM820
-│  (Fluent UI v9)     │      ws://...3001        │  Express + WS    │
-└─────────────────────┘                          │                  │◄──────► Azure Speech SDK
-                                                 │                  │         (Dante audio in)
-                                                 └──────────────────┘
+┌──────────────────────────────────┐
+│         Browser (React)          │
+│  Fluent UI v9  ·  Web Speech API │
+│  Azure Speech SDK (client-side)  │
+│                                  │
+│  Mic ──► Azure Cloud ──► Results │
+│              │                   │
+│         WebSocket (transcript)   │
+└──────────────┬───────────────────┘
+               │ ws://localhost:3001
+┌──────────────▼───────────────────┐
+│         Node.js Server           │
+│  Express REST  ·  WebSocket hub  │
+│                                  │
+│  /api/transcription/token ──► Azure (key stays server-side)
+│  /api/configure          ──► swap audio source at runtime
+│  /api/members            ──► persist channel names
+└──────────────┬───────────────────┘
+               │ TCP :2202
+        Shure SCM820 mixer
+        (falls back to simulation if unreachable)
 ```
 
-- **Server** (`server/`) — Node.js, Express REST + WebSocket, polls the SCM820 every 200 ms
-- **Client** (`client/`) — React 19, Fluent UI v9, auto-reconnecting WebSocket hook
+**Key design decisions:**
+- The Azure Speech key never leaves the server — the browser fetches a short-lived token via `/api/transcription/token`
+- Both browser (Web Speech API) and Azure transcription run entirely client-side; the server is only a WebSocket hub and token issuer
+- Audio source is hot-swappable at runtime via `POST /api/configure`
 
 ---
 
-## Prerequisites
+## Quick Start
 
-| Requirement | Notes |
+### 1. Install dependencies
+
+```bash
+# Server
+cd server && npm install
+
+# Client
+cd client && npm install
+```
+
+### 2. Configure the server
+
+Copy `.env.example` to `.env` and fill in your values:
+
+```bash
+cp server/.env.example server/.env
+```
+
+| Variable | Required | Description |
+|---|---|---|
+| `AZURE_SPEECH_KEY` | For Azure transcription | Key 1 from your Azure Speech resource |
+| `AZURE_SPEECH_REGION` | For Azure transcription | e.g. `eastus` |
+| `SHURE_IP` | For SCM820 | IP address of the mixer |
+| `SHURE_PORT` | Optional | Default `2202` |
+| `CITY_NAME` | Optional | Shown in the header |
+| `CHAMBER_NAME` | Optional | Shown in the header |
+
+If the SCM820 is unreachable at startup, the server automatically falls back to **simulation mode** (channels rotate through a mock active speaker every ~3 seconds).
+
+### 3. Run
+
+```bash
+# Terminal 1 — server
+cd server && npm run dev
+
+# Terminal 2 — client
+cd client && npm start
+```
+
+Open **http://localhost:3000** in Chrome or Edge.
+
+---
+
+## Setup Wizard
+
+On first load (or after "New Meeting"), the wizard walks through:
+
+1. **Source** — SCM820 mixer, Zoom webhook, or Simulation
+2. **Transcription** — choose provider and language
+3. **Names** — assign names and titles to each channel
+4. **Connect** — connects to the audio source
+
+The session persists across hot-reloads but resets on page refresh.
+
+---
+
+## Transcription Providers
+
+### Browser (free, no key needed)
+Uses the browser's built-in Web Speech API (Chrome / Edge only). Reliable for English. Limited support for other languages.
+
+### Azure Cognitive Speech (recommended for non-English)
+Runs in the browser using a server-issued token. Supports 146 languages including Arabic, Hindi, Urdu, Spanish, Filipino, Vietnamese, and more.
+
+**To enable Azure:**
+1. Create a Speech resource in [portal.azure.com](https://portal.azure.com) → Free F0 tier is sufficient for testing
+2. Copy **Key 1** and the **Location/Region** from Keys and Endpoint
+3. Add to `server/.env`:
+   ```
+   AZURE_SPEECH_KEY=your-key-here
+   AZURE_SPEECH_REGION=eastus
+   ```
+4. Restart the server, go through the wizard, and select **Azure Cognitive Speech**
+
+**Note:** Azure real-time STT supports `ur-IN` for Urdu (not `ur-PK`). The transcription quality is the same for Pakistani Urdu.
+
+---
+
+## Audio Sources
+
+| Source | Description |
 |---|---|
-| Node.js 18+ | Both client and server |
-| Shure SCM820 | On the same network, TCP port 2202 open |
-| Dante Virtual Soundcard | Routes mixer output to this machine's audio input |
-| Azure Cognitive Speech resource | Key + region required for transcription |
+| **SCM820** | Shure IntelliMix SCM820 over TCP port 2202. Gate-open events drive speaker attribution. Falls back to simulation after 5 s if unreachable. |
+| **Zoom** | Webhook-based. Receives `participant_joined`, `participant_left`, and `active_speaker` events from a Zoom App. |
+| **Simulation** | Built-in mock that rotates the active speaker every ~3 seconds. Useful for development and testing without hardware. |
 
 ---
 
-## Setup
+## Speaker Attribution
 
-### 1. Server
-
-```bash
-cd server
-npm install
-cp .env.example .env   # fill in your values
-npm run dev
-```
-
-**.env variables:**
-
-```
-SHURE_IP=192.168.1.100
-SHURE_PORT=2202
-AZURE_SPEECH_KEY=your_key_here
-AZURE_SPEECH_REGION=westus2
-PORT=3001
-CITY_NAME=City of Fairfield
-CHAMBER_NAME=Council Chamber
-```
-
-### 2. Client
-
-```bash
-cd client
-npm install
-npm start
-```
-
-Opens at `http://localhost:3000`. Proxies API and WebSocket calls to `localhost:3001`.
+Transcription entries are attributed to the currently active speaker using:
+1. The channel with its gate open (not muted) — primary signal from SCM820
+2. Fallback: highest audio level among unmuted channels
 
 ---
 
-## Development (no physical mixer)
+## Production Deployment
 
-The server automatically falls back to simulation mode if the SCM820 is unreachable within 5 seconds. You can also trigger it manually:
+For a real council chamber:
 
-```bash
-curl -X POST http://localhost:3001/api/simulate
-```
-
-Simulation rotates the active channel every ~3 seconds across all 8 channels.
-
----
-
-## Channel / Council Member Mapping
-
-Edit `server/config.js` to update names and titles:
-
-```js
-councilMembers: {
-  1: { name: 'Mayor Catherine Moy',           title: 'Mayor' },
-  2: { name: 'Vice Mayor Manny Cardenas',      title: 'Vice Mayor' },
-  3: { name: 'Council Member Rick Vaccaro',    title: 'Council Member' },
-  4: { name: 'Council Member Harry Price',     title: 'Council Member' },
-  5: { name: 'Council Member Nico Nava',       title: 'Council Member' },
-  6: { name: 'City Manager',                   title: 'City Manager' },
-  7: { name: 'City Attorney',                  title: 'City Attorney' },
-  8: { name: 'City Clerk',                     title: 'City Clerk' },
-}
-```
-
-Names are synced to the mixer's channel labels on connect (max 31 characters).
+1. Connect a machine running this server to the same network as the SCM820
+2. Route mixer output to **Dante Virtual Soundcard** on the server machine and set it as the default audio input — this is used by the server-side Azure SDK path if needed
+3. Run the client on a dedicated display machine (or serve the React build statically)
+4. Use the SCM820 source in the wizard
 
 ---
 
-## REST API
+## Project Structure
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/meeting` | Meeting info + council member list |
-| `GET` | `/api/channels` | All 8 channel states |
-| `GET` | `/api/channels/:ch` | Single channel state |
-| `POST` | `/api/channels/:ch/mute` | `{ muted: true\|false }` |
-| `POST` | `/api/transcription/start` | Start Azure Speech |
-| `POST` | `/api/transcription/stop` | Stop Azure Speech |
-| `POST` | `/api/simulate` | Force simulation mode |
-
-## WebSocket Messages
-
-All messages: `{ type, payload, ts }`
-
-| Type | Direction | Description |
-|---|---|---|
-| `init` | server → client | Full state on connect |
-| `mixer:connected` | server → client | SCM820 came online |
-| `mixer:disconnected` | server → client | SCM820 went offline |
-| `channel:update` | server → client | Single channel state changed |
-| `transcript:final` | server → client | Committed transcript entry |
-| `transcript:interim` | server → client | In-progress speech (italic) |
-| `transcription:started` | server → client | Recording began |
-| `transcription:stopped` | server → client | Recording ended |
-| `mute` | client → server | `{ channel, muted }` mute command |
+```
+council-chamber/
+├── server/
+│   ├── index.js              # Express + WebSocket server
+│   ├── config.js             # Env-based configuration
+│   ├── members.json          # Persisted channel name/title assignments
+│   ├── sources/
+│   │   ├── base.js           # AudioSource base class (EventEmitter)
+│   │   ├── scm820.js         # Shure SCM820 TCP adapter
+│   │   ├── simulation.js     # Mock rotating-speaker source
+│   │   ├── zoom.js           # Zoom webhook source
+│   │   └── index.js          # Factory function
+│   └── transcription/
+│       └── azure-speech.js   # Server-side Azure SDK (for Dante/production)
+└── client/
+    └── src/
+        ├── App.tsx                        # Root — WebSocket, transcription wiring
+        ├── components/
+        │   ├── MeetingHeader.tsx          # Title bar + status badges
+        │   ├── MixerPanel.tsx             # 8-channel mixer grid
+        │   ├── CouncilMemberCard.tsx      # Per-channel card (gate, mute, level)
+        │   ├── TranscriptPanel.tsx        # Live transcript with pause/resume
+        │   └── setup/
+        │       ├── SetupWizard.tsx        # Multi-step setup flow
+        │       ├── SourceSelectStep.tsx   # Source picker
+        │       ├── ConfigStep.tsx         # Mixer IP + transcription settings
+        │       └── NamesStep.tsx          # Channel name/title assignment
+        └── hooks/
+            ├── useWebSocket.ts            # Auto-reconnecting WS hook
+            ├── useBrowserTranscription.ts # Web Speech API hook
+            └── useAzureTranscription.ts   # Azure SDK (browser, token-based)
+```

@@ -6,6 +6,7 @@ import {
   Button,
   Input,
   makeStyles,
+  mergeClasses,
   tokens,
   Tooltip,
   Label,
@@ -145,17 +146,17 @@ export const CouncilMemberCard: React.FC<Props> = ({
     .slice(0, 2)
     .join('');
 
-  const cardClass = [
+  const cardClass = mergeClasses(
     styles.card,
-    editMode ? styles.cardEdit : '',
-    !editMode && state.active ? styles.cardActive : '',
-    !editMode && state.muted ? styles.cardMuted : '',
-  ].join(' ');
+    editMode && styles.cardEdit,
+    !editMode && state.active && styles.cardActive,
+    !editMode && state.muted && styles.cardMuted,
+  );
 
   return (
     <Card className={cardClass} style={{ padding: '12px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <div className={`${styles.avatar} ${!editMode && state.active ? styles.avatarActive : ''}`}>
+        <div className={mergeClasses(styles.avatar, !editMode && state.active && styles.avatarActive)}>
           {initials}
         </div>
         <div className={styles.info}>
@@ -205,7 +206,7 @@ export const CouncilMemberCard: React.FC<Props> = ({
         <div className={styles.footer}>
           <div className={styles.level}>
             <div
-              className={`${styles.levelBar} ${state.active ? styles.levelBarActive : ''}`}
+              className={mergeClasses(styles.levelBar, state.active && styles.levelBarActive)}
               style={{ width: `${Math.min(state.level, 100)}%` }}
             />
           </div>
