@@ -2,11 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { makeStyles, tokens } from '@fluentui/react-components';
 import { MeetingHeader } from './components/MeetingHeader';
 import { MixerPanel } from './components/MixerPanel';
-import { TranscriptPanel, TranscriptEntry } from './components/TranscriptPanel';
+import { TranscriptPanel, TranscriptEntry } from './components/TranscriptPanelEnhanced';
 import { SetupWizard } from './components/setup/SetupWizard';
+import { SettingsPanel } from './components/SettingsPanel';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useBrowserTranscription } from './hooks/useBrowserTranscription';
 import { useAzureTranscription } from './hooks/useAzureTranscription';
+import { useSettings } from './contexts/SettingsContext';
+import { useToast } from './contexts/ToastContext';
 
 const WS_URL = `ws://${window.location.hostname}:3001`;
 const API_URL = `http://${window.location.hostname}:3001`;
@@ -25,14 +28,28 @@ const useStyles = makeStyles({
     gap: '12px',
     padding: '12px',
     overflow: 'hidden',
+    '@media (max-width: 1024px)': {
+      flexDirection: 'column',
+    },
   },
   mixer: {
     flex: '0 0 420px',
     overflow: 'hidden',
+    '@media (max-width: 1024px)': {
+      flex: '0 0 auto',
+      maxHeight: '40vh',
+    },
+    '@media (max-width: 768px)': {
+      display: 'none',
+    },
+  },
+  mixerHidden: {
+    display: 'none',
   },
   transcript: {
     flex: 1,
     overflow: 'hidden',
+    minWidth: 0,
   },
 });
 
@@ -50,11 +67,14 @@ const SESSION_KEY = 'cc_session_active';
 
 export default function App() {
   const styles = useStyles();
+  const { settings } = useSettings();
+  const { showError, showSuccess } = useToast();
   const { lastMessage, send } = useWebSocket(WS_URL);
 
   const [setupDone, setSetupDone] = useState(
     () => sessionStorage.getItem(SESSION_KEY) === 'true'
   );
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [cityName, setCityName] = useState('City of Fairfield');
   const [chamberName, setChamberName] = useState('Council Chamber');
@@ -250,13 +270,22 @@ export default function App() {
   const handleSaveMembers = useCallback(async (
     updated: Record<number, { name: string; title: string }>
   ) => {
-    const res = await fetch(`${API_URL}/api/members`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updated),
-    });
-    if (!res.ok) throw new Error('Failed to save members');
-  }, []);
+    try {
+      const res = await fetch(`${API_URL}/api/members`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to save members');
+      }
+      showSuccess('Member names saved');
+    } catch (error) {
+      showError('Failed to save members', (error as Error).message);
+      throw error;
+    }
+  }, [showSuccess, showError]);
 
   return (
     <>
@@ -269,16 +298,19 @@ export default function App() {
           transcriptionRunning={transcriptionRunning}
           mixerConnected={mixerConnected}
           onNewMeeting={handleNewMeeting}
+          onSettingsClick={() => setSettingsOpen(true)}
         />
         <div className={styles.body}>
-          <div className={styles.mixer}>
-            <MixerPanel
-              channels={channels}
-              mixerConnected={mixerConnected}
-              onMuteToggle={handleMuteToggle}
-              onSaveMembers={handleSaveMembers}
-            />
-          </div>
+          {settings.showMixerPanel && (
+            <div className={styles.mixer}>
+              <MixerPanel
+                channels={channels}
+                mixerConnected={mixerConnected}
+                onMuteToggle={handleMuteToggle}
+                onSaveMembers={handleSaveMembers}
+              />
+            </div>
+          )}
           <div className={styles.transcript}>
             <TranscriptPanel
               entries={transcriptEntries}
@@ -289,6 +321,8 @@ export default function App() {
               language={language}
               supported={provider === 'azure' ? true : browserTranscription.supported}
               micError={transcription.error}
+              cityName={cityName}
+              chamberName={chamberName}
               onStart={handleStartTranscription}
               onPause={handlePauseTranscription}
               onResume={handleResumeTranscription}
@@ -298,6 +332,8 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </>
   );
 }

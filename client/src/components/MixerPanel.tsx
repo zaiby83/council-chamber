@@ -52,6 +52,12 @@ const useStyles = makeStyles({
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
     gap: '10px',
+    '@media (max-width: 1024px)': {
+      gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+    },
+    '@media (max-width: 768px)': {
+      gridTemplateColumns: '1fr',
+    },
   },
   offline: {
     display: 'flex',

@@ -323,24 +323,24 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
   const currentIdx = visibleSteps.findIndex((s) => s.key === step);
 
   return (
-    <div className={styles.overlay}>
+    <div className={styles.overlay} role="dialog" aria-modal="true" aria-labelledby="wizard-title">
       <div className={styles.card}>
         {/* Header */}
         <div className={styles.header}>
           <Text className={styles.headerSub}>Council Chamber</Text>
-          <Text className={styles.headerTitle}>New Meeting Setup</Text>
+          <Text className={styles.headerTitle} id="wizard-title">New Meeting Setup</Text>
         </div>
 
         {/* Step indicator */}
-        <div className={styles.steps}>
+        <div className={styles.steps} role="navigation" aria-label="Setup progress">
           {visibleSteps.map((s, i) => {
             const isDone = i < currentIdx;
             const isActive = s.key === step;
             return (
               <React.Fragment key={s.key}>
-                {i > 0 && <div className={styles.stepDivider} />}
-                <div className={styles.step}>
-                  <div className={mergeClasses(styles.stepDot, isDone && styles.stepDotDone, isActive && styles.stepDotActive)}>
+                {i > 0 && <div className={styles.stepDivider} aria-hidden="true" />}
+                <div className={styles.step} aria-current={isActive ? 'step' : undefined}>
+                  <div className={mergeClasses(styles.stepDot, isDone && styles.stepDotDone, isActive && styles.stepDotActive)} aria-hidden="true">
                     {isDone ? '✓' : i + 1}
                   </div>
                   <Text className={mergeClasses(styles.stepLabel, isActive && styles.stepLabelActive)}>
@@ -353,7 +353,7 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
         </div>
 
         {/* Body */}
-        <div className={styles.body}>
+        <div className={styles.body} role="main">
           {serverReachable === false && (
             <MessageBar intent="error" style={{ marginBottom: '16px' }}>
               <MessageBarBody>
@@ -371,10 +371,10 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
             <NamesStep members={members} onChange={setMembers} />
           )}
           {step === 'connecting' && (
-            <div className={styles.connecting}>
+            <div className={styles.connecting} role="status" aria-live="polite">
               {connected ? (
                 <div className={styles.connectedMsg}>
-                  <CheckmarkCircleRegular style={{ fontSize: '32px' }} />
+                  <CheckmarkCircleRegular style={{ fontSize: '32px' }} aria-hidden="true" />
                   <Text size={500} weight="semibold">Connected — starting session…</Text>
                 </div>
               ) : (
@@ -389,7 +389,7 @@ export const SetupWizard: React.FC<Props> = ({ onComplete }) => {
               )}
             </div>
           )}
-          {error && <Text className={styles.errorText}>{error}</Text>}
+          {error && <Text className={styles.errorText} role="alert">{error}</Text>}
         </div>
 
         {/* Footer */}

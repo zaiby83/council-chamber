@@ -2,7 +2,6 @@ import React from 'react';
 import {
   Text,
   Input,
-  Label,
   makeStyles,
   tokens,
   Badge,

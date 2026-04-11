@@ -1,13 +1,11 @@
 import React from 'react';
 import {
-  Text,
-  Badge,
   Button,
   makeStyles,
   mergeClasses,
-  tokens,
 } from '@fluentui/react-components';
-import { MicRegular, ArrowResetRegular } from '@fluentui/react-icons';
+import { MicRegular, ArrowResetRegular, WeatherMoonRegular, WeatherSunnyRegular, SettingsRegular } from '@fluentui/react-icons';
+import { useTheme } from '../contexts/ThemeContext';
 
 const useStyles = makeStyles({
   header: {
@@ -63,7 +61,13 @@ const useStyles = makeStyles({
   dotLive: {
     background: '#4caf50',
     boxShadow: '0 0 6px #4caf50',
-    animation: 'pulse 1.5s infinite',
+    animationName: {
+      '0%': { opacity: 1 },
+      '50%': { opacity: 0.5 },
+      '100%': { opacity: 1 },
+    },
+    animationDuration: '1.5s',
+    animationIterationCount: 'infinite',
   },
   dotOff: {
     background: '#999',
@@ -81,6 +85,7 @@ interface Props {
   transcriptionRunning: boolean;
   mixerConnected: boolean;
   onNewMeeting: () => void;
+  onSettingsClick: () => void;
 }
 
 export const MeetingHeader: React.FC<Props> = ({
@@ -89,8 +94,10 @@ export const MeetingHeader: React.FC<Props> = ({
   transcriptionRunning,
   mixerConnected,
   onNewMeeting,
+  onSettingsClick,
 }) => {
   const styles = useStyles();
+  const { mode, toggleTheme } = useTheme();
   const [time, setTime] = React.useState(new Date());
 
   React.useEffect(() => {
@@ -99,25 +106,54 @@ export const MeetingHeader: React.FC<Props> = ({
   }, []);
 
   return (
-    <header className={styles.header}>
+    <header className={styles.header} role="banner">
       <div className={styles.left}>
         <span className={styles.cityName}>{cityName}</span>
         <span className={styles.chamberName}>{chamberName}</span>
       </div>
       <div className={styles.right}>
-        <span className={styles.time}>
+        <span className={styles.time} aria-live="off">
           {time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
         </span>
-        <div className={mergeClasses(styles.statusBadge, styles.liveStatus)}>
-          <span className={mergeClasses(styles.dot, mixerConnected ? styles.dotLive : styles.dotOff)} />
+        <div 
+          className={mergeClasses(styles.statusBadge, styles.liveStatus)}
+          role="status"
+          aria-label={mixerConnected ? 'Mixer connected' : 'Mixer offline'}
+        >
+          <span 
+            className={mergeClasses(styles.dot, mixerConnected ? styles.dotLive : styles.dotOff)}
+            aria-hidden="true"
+          />
           {mixerConnected ? 'Mixer Connected' : 'Mixer Offline'}
         </div>
         {transcriptionRunning && (
-          <div className={mergeClasses(styles.statusBadge, styles.liveStatus)}>
-            <MicRegular style={{ fontSize: '16px' }} />
+          <div 
+            className={mergeClasses(styles.statusBadge, styles.liveStatus)}
+            role="status"
+            aria-label="Live transcription active"
+          >
+            <MicRegular style={{ fontSize: '16px' }} aria-hidden="true" />
             Live Transcript
           </div>
         )}
+        <Button
+          icon={mode === 'dark' ? <WeatherSunnyRegular /> : <WeatherMoonRegular />}
+          appearance="subtle"
+          size="small"
+          onClick={toggleTheme}
+          style={{ color: 'rgba(255,255,255,0.75)' }}
+          title={mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          aria-label={mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        />
+        <Button
+          icon={<SettingsRegular />}
+          appearance="subtle"
+          size="small"
+          onClick={onSettingsClick}
+          style={{ color: 'rgba(255,255,255,0.75)' }}
+          title="Settings"
+          aria-label="Open settings"
+        />
         <Button
           icon={<ArrowResetRegular />}
           appearance="subtle"
@@ -125,6 +161,7 @@ export const MeetingHeader: React.FC<Props> = ({
           onClick={onNewMeeting}
           style={{ color: 'rgba(255,255,255,0.75)' }}
           title="New meeting"
+          aria-label="Start new meeting"
         />
       </div>
     </header>

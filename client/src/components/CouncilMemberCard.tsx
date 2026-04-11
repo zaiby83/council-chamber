@@ -130,7 +130,7 @@ interface Props {
   onDraftChange?: (field: 'name' | 'title', value: string) => void;
 }
 
-export const CouncilMemberCard: React.FC<Props> = ({
+export const CouncilMemberCard: React.FC<Props> = React.memo(({
   state,
   onMuteToggle,
   editMode = false,
@@ -225,4 +225,4 @@ export const CouncilMemberCard: React.FC<Props> = ({
       )}
     </Card>
   );
-};
+});

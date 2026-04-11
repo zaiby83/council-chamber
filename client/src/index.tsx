@@ -1,19 +1,27 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { FluentProvider } from '@fluentui/react-components';
-import { fairfieldTheme } from './theme/teamsTheme';
 import './index.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
+import ErrorBoundary from './components/ErrorBoundary';
+import { ThemeProvider } from './contexts/ThemeContext';
+import { ToastProvider } from './contexts/ToastContext';
+import { SettingsProvider } from './contexts/SettingsContext';
 
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
 );
 root.render(
   <React.StrictMode>
-    <FluentProvider theme={fairfieldTheme}>
-      <App />
-    </FluentProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <ToastProvider>
+          <SettingsProvider>
+            <App />
+          </SettingsProvider>
+        </ToastProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   </React.StrictMode>
 );
 

@@ -97,19 +97,32 @@ interface Props {
 
 export const SourceSelectStep: React.FC<Props> = ({ selected, onChange }) => {
   const styles = useStyles();
+  
+  const handleKeyDown = (e: React.KeyboardEvent, sourceId: SourceType) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onChange(sourceId);
+    }
+  };
+
   return (
     <div className={styles.root}>
       <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
         Choose how this session will capture audio and track speakers.
       </Text>
-      <div className={styles.grid}>
+      <div className={styles.grid} role="radiogroup" aria-label="Audio source selection">
         {SOURCES.map((s) => (
           <Card
             key={s.id}
             className={`${styles.card} ${selected === s.id ? styles.cardSelected : ''}`}
             onClick={() => onChange(s.id)}
+            onKeyDown={(e) => handleKeyDown(e, s.id)}
+            tabIndex={0}
+            role="radio"
+            aria-checked={selected === s.id}
+            aria-label={`${s.label}: ${s.desc}`}
           >
-            <div className={`${styles.iconWrap} ${selected === s.id ? styles.iconWrapSelected : ''}`}>
+            <div className={`${styles.iconWrap} ${selected === s.id ? styles.iconWrapSelected : ''}`} aria-hidden="true">
               {s.icon}
             </div>
             <Text className={styles.label}>{s.label}</Text>
