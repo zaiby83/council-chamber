@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  council-chamber:
+    build: .
+    container_name: council-chamber
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - SHURE_IP=${SHURE_IP:-192.168.1.100}
+      - SHURE_PORT=${SHURE_PORT:-2202}
+      - AZURE_SPEECH_KEY=${AZURE_SPEECH_KEY}
+      - AZURE_SPEECH_REGION=${AZURE_SPEECH_REGION:-westus2}
+      - CITY_NAME=${CITY_NAME:-City of Fairfield}
+      - CHAMBER_NAME=${CHAMBER_NAME:-Council Chamber}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - ./server/data:/app/data
+      - ./server/logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - council-network
+
+networks:
+  council-network:
+    driver: bridge

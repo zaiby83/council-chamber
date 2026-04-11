@@ -5,13 +5,23 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "prod": "NODE_ENV=production node index.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop ecosystem.config.js",
+    "pm2:restart": "pm2 restart ecosystem.config.js",
+    "pm2:logs": "pm2 logs council-chamber",
+    "backup": "node scripts/backup.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.18.3",
+    "express-rate-limit": "^7.5.1",
+    "helmet": "^7.2.0",
     "microsoft-cognitiveservices-speech-sdk": "^1.36.0",
+    "morgan": "^1.10.1",
+    "winston": "^3.19.0",
     "ws": "^8.17.0"
   },
   "devDependencies": {
